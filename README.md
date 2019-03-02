@@ -14,17 +14,21 @@ These pipelines are called in custom scripts. They should be obtained and tested
 Most scripts are run relative to the current directory, so initialize your workspace similarly to the repo
 
 ## Main pipeline
+'''
 cd [workspace]
 source activate [conda environment]
 snakemake
-
+'''
 ## Methylation references pipeline
+'''
 cd Methylation_References_snaked
 source activate [conda environment]
 snakemake
-
+'''
 ## Run scripts for specific tasks
+'''
 cd [workspace]/Bin
 
-### Donor fractions
+# Donor fractions
 bash donor_fractions_par.sh [make sure you have enough CPUs available, or change it in the script]
+'''
