@@ -2,6 +2,14 @@
 Custom scripts used for data analysis of microbial and human derived cell-free DNA after bisulfite treatment published in [...]
 Major data analysis pipeline is written using the snakemake workflow (https://snakemake.readthedocs.io/en/stable/).
 
+## Required pipelines
+These pipelines are called in custom scripts. They should be obtained and tested before running entire pipeline.
+1- Bismark
+2- CrossMap
+3- Methpipe
+4- bwa-meth
+5- MethylDackel
+
 ## Folder structure
 Most scripts are run relative to the current directory, so initialize your workspace similarly to the repo
 
