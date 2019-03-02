@@ -4,11 +4,11 @@ Major data analysis pipeline is written using the snakemake workflow (https://sn
 
 ## Required pipelines
 These pipelines are called in custom scripts. They should be obtained and tested before running entire pipeline.
-1- Bismark
-2- CrossMap
-3- Methpipe
-4- bwa-meth
-5- MethylDackel
+- Bismark
+- CrossMap
+- Methpipe
+- bwa-meth
+- MethylDackel
 
 ## Folder structure
 Most scripts are run relative to the current directory, so initialize your workspace similarly to the repo
