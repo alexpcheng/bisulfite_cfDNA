@@ -17,3 +17,6 @@ snakemake
 
 ## Run scripts for specific tasks
 cd [workspace]/Bin
+
+### Donor fractions
+bash donor_fractions_par.sh [make sure you have enough CPUs available, or change it in the script]
