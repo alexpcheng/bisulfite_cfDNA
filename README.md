@@ -4,6 +4,7 @@ Major data analysis pipeline is written using the snakemake workflow (https://sn
 
 ## Required pipelines
 The following softwares need to be available, as they are called in certain parts of the pipeline
+- snakemake 
 - Bismark
 - CrossMap
 - Methpipe
