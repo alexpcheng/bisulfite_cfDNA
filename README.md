@@ -10,31 +10,50 @@ The following softwares need to be available, as they are called in certain part
 - Methpipe
 - bwa-meth
 - MethylDackel
+- ... [bedtools, etc.]
 
 ## Folder structure
 Most scripts are run relative to the current directory, so initialize your workspace similarly to the repo:
 ```
 git clone https://github.com/alexpcheng/bisulfite_cfDNA/
 ```
-
 ## Main pipeline
 ```
-cd [workspace]
+cd bisulfite_cfDNA
 source activate [conda environment]
 snakemake
 ```
+
 ## Methylation references pipeline
 ```
-cd Methylation_References_snaked
+cd bisulfite_cfDNA/Methylation_References_snaked
 source activate [conda environment]
 snakemake
+```
+## Genomic abundance of pathogens
+```
+#make sure the BLASTDB variable is in your path and contains the following folder: 
+# ...
+cd bisulfite_cfDNA/GRAMMy/
+snakemake 
 ```
 ## Run scripts for specific tasks
 ```
-cd [workspace]/Bin
+cd bisulfite_cfDNA/Bin
 
 # Donor fractions
 bash donor_fractions_par.sh #make sure you have enough CPUs available, or change it in the script
 
-#
+# Reads per sample
+bash fastq_reads_par.sh
+
+# Get lengths profile of reads with high mapQ
+bash get_HQ_lengths.sh
+
+# Certain read mapping stats
+bash read_mapping_statistics_par.sh
+```
+
+## Generate figures as found in [publication]
+```
 ```
