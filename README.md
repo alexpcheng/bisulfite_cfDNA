@@ -1,5 +1,5 @@
 # bisulfite_cfDNA
-Custom scripts used for data analysis of microbial and human derived cell-free DNA after bisulfite treatment published in [...]
+Custom scripts used for data analysis of microbial and human derived cell-free DNA after bisulfite treatment published in [journal]
 Major data analysis pipeline is written using the snakemake workflow (https://snakemake.readthedocs.io/en/stable/).
 
 ## Required pipelines
@@ -26,16 +26,17 @@ The following softwares need to be available, as they are called in certain part
 - SGREP
 - bwa-meth
 - bwa
-
-## Creating databases, indexing references...
-
+- GRAMMy
 ## Folder structure
 Most scripts are run relative to the current directory, so initialize your workspace similarly to the repo:
 ```
 git clone https://github.com/alexpcheng/bisulfite_cfDNA/
 ```
+
 ## Main pipeline
 ```
+# Index your reference genome using bwa-meth
+# bwameth.py index [REFERENCE]
 cd bisulfite_cfDNA
 source activate [conda environment]
 snakemake
@@ -50,8 +51,10 @@ snakemake
 ## Genomic abundance of pathogens
 ```
 #make sure the BLASTDB variable is in your path and contains the following folder: 
-# ...
 cd bisulfite_cfDNA/GRAMMy/
+source activate [conda environment]
+#prepare GRAMMy and BLAST databases
+snakemake -s Snakefile.databases
 snakemake 
 ```
 ## Run scripts for specific tasks
