@@ -4,13 +4,30 @@ Major data analysis pipeline is written using the snakemake workflow (https://sn
 
 ## Required pipelines
 The following softwares need to be available, as they are called in certain parts of the pipeline
-- snakemake 
-- Bismark
-- CrossMap
-- Methpipe
+### Main pipeline
+- snakemake
+- Trimmomatic
 - bwa-meth
+- Samtools
 - MethylDackel
-- ... [bedtools, etc.]
+- BEDTools
+- BEDOPS
+- methpipe
+
+### Methylation references pipeline
+- CrossMap
+- Metilene
+- BEDTools
+
+### Genomic abundance of pathogens
+- Samtools
+- Trimmomatic
+- FLASH
+- SGREP
+- bwa-meth
+- bwa
+
+## Creating databases, indexing references...
 
 ## Folder structure
 Most scripts are run relative to the current directory, so initialize your workspace similarly to the repo:
