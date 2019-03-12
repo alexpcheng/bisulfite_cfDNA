@@ -36,7 +36,10 @@ git clone https://github.com/alexpcheng/bisulfite_cfDNA/
 ## Main pipeline
 ```
 # Index your reference genome using bwa-meth
-# bwameth.py index [REFERENCE]
+bwameth.py index [REFERENCE]
+
+# modify the config file with file names and locations of the previously mentioned software.
+
 cd bisulfite_cfDNA
 source activate [conda environment]
 snakemake
@@ -44,17 +47,20 @@ snakemake
 
 ## Methylation references pipeline
 ```
+# modify the config file with file names and locations of the previously mentioned software.
 cd bisulfite_cfDNA/Methylation_References_snaked
 source activate [conda environment]
 snakemake
 ```
 ## Genomic abundance of pathogens
 ```
-#make sure the BLASTDB variable is in your path and contains the following folder: 
+# modify the config file with file names and locations of the previously mentioned software.
+#make sure the BLASTDB variable is in your path and points to your NCBI blastDB.
 cd bisulfite_cfDNA/GRAMMy/
 source activate [conda environment]
 #prepare GRAMMy and BLAST databases
 snakemake -s Snakefile.databases
+# main pipeline
 snakemake 
 ```
 ## Run scripts for specific tasks
@@ -63,9 +69,6 @@ cd bisulfite_cfDNA/Bin
 
 # Donor fractions
 bash donor_fractions_par.sh #make sure you have enough CPUs available, or change it in the script
-
-# Reads per sample
-bash fastq_reads_par.sh
 
 # Get lengths profile of reads with high mapQ
 bash get_HQ_lengths.sh
