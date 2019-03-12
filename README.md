@@ -1,8 +1,7 @@
 # bisulfite_cfDNA
 Custom scripts used for data analysis of microbial and human derived cell-free DNA after bisulfite treatment published in [journal]
-Major data analysis pipeline is written using the snakemake workflow (https://snakemake.readthedocs.io/en/stable/).
 
-## Required pipelines
+## Requirements
 The following softwares need to be available, as they are called in certain parts of the pipeline
 ### Main pipeline
 - snakemake
@@ -15,11 +14,13 @@ The following softwares need to be available, as they are called in certain part
 - methpipe
 
 ### Methylation references pipeline
+- snakemake
 - CrossMap
 - Metilene
 - BEDTools
 
 ### Genomic abundance of pathogens
+- snakemake
 - Samtools
 - Trimmomatic
 - FLASH
@@ -55,7 +56,7 @@ snakemake
 ## Genomic abundance of pathogens
 ```
 # modify the config file with file names and locations of the previously mentioned software.
-#make sure the BLASTDB variable is in your path and points to your NCBI blastDB.
+#make sure the BLASTDB variable is in your path and points to your NCBI blast database.
 cd bisulfite_cfDNA/GRAMMy/
 source activate [conda environment]
 #prepare GRAMMy and BLAST databases
@@ -79,4 +80,6 @@ bash read_mapping_statistics_par.sh
 
 ## Generate figures as found in [publication]
 ```
+cd bisulfite_cfDNA/Bin
+R..
 ```
