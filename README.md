@@ -28,6 +28,7 @@ The following softwares need to be available, as they are called in certain part
 - bwa-meth
 - bwa
 - GRAMMy
+
 ## Folder structure
 Most scripts are run relative to the current directory, so initialize your workspace similarly to the repo:
 ```
@@ -49,20 +50,29 @@ snakemake
 ## Methylation references pipeline
 ```
 # modify the config file with file names and locations of the previously mentioned software.
+
 cd bisulfite_cfDNA/Methylation_References_snaked
+
 source activate [conda environment]
+
 snakemake
 ```
 ## Genomic abundance of pathogens
 ```
 # modify the config file with file names and locations of the previously mentioned software.
-#make sure the BLASTDB variable is in your path and points to your NCBI blast database.
+# make sure the BLASTDB variable is in your path and points to your NCBI blast database.
+
 cd bisulfite_cfDNA/GRAMMy/
+
 source activate [conda environment]
+
 #prepare GRAMMy and BLAST databases
 snakemake -s Snakefile.databases
+
 # main pipeline
 snakemake 
+
+# I then moved all [file].grammy.tab files to bisulfite_cfDNA/V1/infections/ for analysis
 ```
 ## Run scripts for specific tasks
 ```
