@@ -1,0 +1,20 @@
+SAMPLES:
+     ['Filename1' 'Filename2']
+READS:
+     ['_R1', '_R2']
+
+#Locations
+ADAPTOR_SEQUENCES: LEADING:20 TRAILING:20 SLIDINGWINDOW:4:20 MINLEN:25 ILLUMINACLIP:references/adapter_sequences/adapters_meyer.fa:2:30:10
+
+#References
+METHREF: references/hg19_bwameth/hg19.fa
+GENOMEREF: references/hg19_bwameth/hg19.fa
+# Programs 
+TRIM: /programs/trimmomatic/trimmomatic-0.36.jar
+BWAMETH: ~/.local/bin/bwameth.py
+POM: software/MethylDackel/MethylDackel
+METHPIPETOMR: software/methpipe-3.4.3/bin/to-mr
+METHPIPEBSRATE: software/methpipe-3.4.3/bin/bsrate
+
+#Strings
+AUTOSOMALCHROMO: chr1 chr2 chr3 chr4 chr5 chr6 chr7 chr8 chr9 chr10 chr11 chr12 chr13 chr14 chr15 chr16 chr17 chr18 chr19 chr20 chr21 chr22
