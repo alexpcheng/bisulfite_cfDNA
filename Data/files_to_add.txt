@@ -1,0 +1,1 @@
+Add primary fastQ files in this folder
