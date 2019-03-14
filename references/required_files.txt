@@ -1,0 +1,5 @@
+In this folder, make sure the following files and folders are present:
+- adapter_sequences/adapter_file.txt #These are the adapters to be trimmed by Trimmommatic
+- hg19.chr.lengths # file containing the length of all chromosomes in hg19
+- hg19_bwameth/hg19.fa # human reference genome to be indexed by bwa-meth
+- hg38ToHg19.over.chain.gz # chain file to convert hg38 to hg19
