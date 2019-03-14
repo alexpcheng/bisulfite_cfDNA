@@ -1,0 +1,52 @@
+meth_id	urine_culture	primary	secondary
+MET-1-10	Yes	NEG	N/A
+MET-1-18	Yes	Escherichia coli	N/A
+MET-1-04	No	N/A	N/A
+MET-1-08	No	N/A	N/A
+MET-1-09	No	N/A	N/A
+MET-1-15	No	N/A	N/A
+MET-1-22	No	N/A	N/A
+MET-1-27	No	N/A	N/A
+MET-1-28	No	N/A	N/A
+MET-1-38	No	N/A	N/A
+MET-1-61	No	N/A	N/A
+MET-1-50	N/A	N/A	N/A
+MET-1-51	N/A	N/A	N/A
+MET-1-53	N/A	N/A	N/A
+MET-1-62	N/A	N/A	N/A
+MET-1-54	N/A	N/A	N/A
+MET-1-55	N/A	N/A	N/A
+MET-1-58	N/A	N/A	N/A
+MET-1-52	N/A	N/A	N/A
+MET-1-56	N/A	N/A	N/A
+MET-1-57	N/A	N/A	N/A
+MET-1-59	N/A	N/A	N/A
+MET-1-60	N/A	N/A	N/A
+MET-1-63	N/A	N/A	N/A
+MET-1-06	No	N/A	N/A
+MET-1-13	No	N/A	N/A
+MET-1-21	No	N/A	N/A
+MET-1-40	No	N/A	N/A
+MET-1-43	No	N/A	N/A
+MET-1-11	Yes	NEG	N/A
+MET-1-14	Yes	NEG	N/A
+MET-1-16	Yes	NEG	N/A
+MET-1-20	Yes	NEG	N/A
+MET-1-23	Yes	NEG	N/A
+MET-1-24	Yes	IG	N/A
+MET-1-31	Yes	NEG	N/A
+MET-1-33	Yes	NEG	N/A
+MET-1-37	Yes	NEG	N/A
+MET-1-39	Yes	NEG	N/A
+MET-1-44	Yes	NEG	N/A
+MET-1-01	Yes	Pseudomonas aeruginosa	N/A
+MET-1-03	Yes	Enterococcus faecalis	N/A
+MET-1-07	Yes	Enterococcus faecalis	N/A
+MET-1-25	Yes	Klebsiella oxytoca	N/A
+MET-1-26	Yes	Pseudomonas aeruginosa	N/A
+MET-1-30	Yes	Escherichia coli	N/A
+MET-1-32	Yes	Enterococcus faecalis	Staphylococcus (coagulase negative)
+MET-1-34	Yes	Enterococcus faecium	N/A
+MET-1-36	Yes	Escherichia coli	N/A
+MET-1-45	Yes	Escherichia coli	N/A
+MET-1-47	Yes	Enterococcus faecalis	N/A
