@@ -1,0 +1,29 @@
+SAMPLES:
+     ['Short']
+
+EXT:
+     ['C2T', 'G2A']
+
+### Reference Data
+
+HOST_GENOME: data/hg19/hg19.fa
+
+AUTOSOMAL: chr1 chr2 chr3 chr4 chr5 chr6 chr7 chr8 chr9 chr10 chr11 chr12 chr13 chr14 chr15 chr16 chr17 chr18 chr19 chr20 chr21 chr22
+CHROMO_SIZES: Data/hg19.chrom.sizes
+### Software
+
+FLASH: /programs/flash
+SGREP: /programs/sgrep_sorted/bin/sgrep
+SAMTOOLS: /programs/samtools-1.6/bin/samtools
+SEQTK: software/seqtk/seqtk
+TRIM: Bin/Trimmomatic-0.32/trimmomatic-0.32.jar
+TRIM_SETTINGS: ILLUMINACLIP:/Bin/Trimmomatic-0.32/adapters/Meyerprep.fa:2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:30
+
+METHREF: references/hg19_bwameth/hg19.fa
+
+# Programs
+PICARD: /programs/picard-tools-2.1.1/picard.jar
+TRIM: /programs/trimmomatic/trimmomatic-0.36.jar
+BWAMETH: ~/.local/bin/bwameth.py
+BWA_HG19: references/hg19/hg19.fa
+TIME_CMD: /usr/bin/time -v
