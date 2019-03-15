@@ -1,0 +1,1 @@
+add a folder named hg19_bwameth with a bwa-meth indexed hg19 file
