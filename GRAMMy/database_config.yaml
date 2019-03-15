@@ -1,0 +1,6 @@
+#PROGRAMS
+SGREP: /programs/sgrep_sorted/bin/sgrep
+
+#Scripts
+BUILDGREFS: ./Bin/build.grefs.sh
+GRAMMY_GDT: ./Bin/GRAMMy/grammy/grammy_gdt.py

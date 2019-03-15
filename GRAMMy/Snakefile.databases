@@ -1,0 +1,112 @@
+
+##################################
+# Creating the GRAMMy databases needed for metagenome analysis
+# P. Burnham, Iwijn De Vlaminck
+# Massively modified by Alexandre Pellan Cheng
+##################################
+
+#CONFIG PARAMETERS
+
+configfile: 'database_config.yaml'
+SGREP=config['SGREP']
+BUILDGREFS=config['BUILDGREFS']
+GRAMMY_GDT=config['GRAMMY_GDT']
+
+#######################
+rule all:
+	input:
+		expand('GenomeDB/{ext}/NCBIGenomes06{ext}.fna', ext=['C2T', 'G2A']),
+		expand('blast/NCBIGenomes06.gis.taxids{ext}', ext=['C2T', 'G2A']),
+		expand('blast/NCBIGenomes06{ext}.{s}', ext=['C2T', 'G2A'], s=['nal', 'curated.nal']),
+		expand('logs/grammy_prompts{ext}', ext=['C2T', 'G2A'])
+
+########################
+rule convert_database:
+	input:
+		genome_database='GenomeDB/NCBIGenomes06.fna'
+	output:
+		C2T='GenomeDB/C2T/NCBIGenomes06C2T.fna',
+		G2A='GenomeDB/G2A/NCBIGenomes06G2A.fna',
+		database_read_ids='GenomeDB/NCBIGenomes06_readsIDs.txt',
+		#converted='GenomeDB/NCBIGenomes06_converted.fna'
+	run:
+		with open(input.genome_database, 'r') as f:
+			with open(output.C2T, 'w') as c, open(output.G2A, 'w') as g, open(output.database_read_ids, 'w') as ids:
+				for line in f:
+					if line[0]=='>':
+						id_elements=line.split('|')
+						gi=id_elements[1]
+						c.write(line)
+						g.write(line)
+						ids.write(gi+'\n')
+					else:
+						c_line=line.upper().replace('C', 'T')
+						g_line=line.upper().replace('G', 'A')
+						c.write(c_line)
+						g.write(g_line)
+		#os.system('cat ' + output.C2T + ' ' + output.G2A + '>' + output.converted)
+rule gi_to_taxid:
+	input:
+		database_read_ids='GenomeDB/NCBIGenomes06_readsIDs.txt',
+		dmp='gi_taxid_nucl.dmp'
+	output:
+		taxids='blast/NCBIGenomes06.gis.taxids{ext}', #change folder name to blastD
+		gi_list=temp('blast/just_gi{ext}')
+	shell: #need to double check output with Scripts/extract.gis.sh
+		"""
+		cat {input.database_read_ids} | while read gi
+		do
+			taxid=$({SGREP} -n $gi {input.dmp} | cut -f 2,3 || true)
+			if [ ! -z "$taxid" ]
+			then
+				echo -e "$gi\t$taxid" >> {output.taxids}
+			fi
+		done
+		cut -f1 {output.taxids} > {output.gi_list}
+		"""
+rule create_blast_database:
+	input:
+		taxids='blast/NCBIGenomes06.gis.taxids{ext}',
+		genome='GenomeDB/{ext}/NCBIGenomes06{ext}.fna',
+		gi_list='blast/just_gi{ext}'
+	output:
+		'blast/NCBIGenomes06{ext}.nal',
+		'blast/NCBIGenomes06{ext}.curated.nal'
+	params:
+		out_prefix='NCBIGenomes06{ext}',
+		just_gi='just_gi{ext}'
+	shell:
+		"""
+		makeblastdb -in {input.genome} -out blast/{params.out_prefix} -dbtype nucl -parse_seqids -taxid_map {input.taxids}
+		cd blast
+		blastdb_aliastool -db {params.out_prefix} -gilist {params.just_gi} -dbtype nucl -out {params.out_prefix}.curated
+		"""
+rule create_grammy_database: #I'm sure theres a better way to multithread this ...
+	input:
+		'blast/NCBIGenomes06{ext}.nal',
+		taxids='blast/NCBIGenomes06.gis.taxids{ext}'
+	output:
+		prompt='logs/grammy_prompts{ext}',
+		taxids='grefs/{ext}/gid_tid.dmp'
+	threads: 5
+	params:
+		genome_prefix='blast/NCBIGenomes06',
+		genome='NCBIGenomes06{ext}'
+	shell:
+		"""
+		mkdir -p grefs
+		mkdir -p grefs/{wildcards.ext}
+		blastdbcmd -db {params.genome_prefix}{wildcards.ext}.curated -entry all -outfmt "%T" | sort | uniq | while read taxid
+		do
+			echo "{BUILDGREFS} {params.genome_prefix} $taxid {wildcards.ext}" >> {output.prompt}
+		done
+		perl_fork_univ.pl {output.prompt} {threads}
+
+		cp {input.taxids} {output.taxids}
+		TIDS=$(cat {input.taxids} | cut -f2 | sort -u | tr '\n' ',')
+		TAXIDS=${{TIDS::-1}}
+
+		python2.7 {GRAMMY_GDT} -p 200000 -d {output.taxids} -r grefs/{wildcards.ext} {params.genome} $TAXIDS
+		mkdir -p grammy
+		mv {params.genome}.gdt grammy
+		"""

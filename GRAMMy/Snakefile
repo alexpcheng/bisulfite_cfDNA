@@ -1,0 +1,426 @@
+##################################
+# Urine cell-free DNA pipeline
+# P. Burnham, Iwijn De Vlaminck, Alexandre Pellan Cheng
+##################################
+
+configfile: 'config.yaml'
+
+FLASH = config['FLASH']
+TRIM = config['TRIM']
+TRIM_SETTINGS = config['TRIM_SETTINGS']
+BWAMETH=config['BWAMETH']
+METHREF=config['METHREF']
+BWA_HG19=config['BWA_HG19']
+TIME_CMD=config['TIME_CMD']
+CHROMO_SIZES=config['CHROMO_SIZES']
+SEQTK=config['SEQTK']
+#######################
+rule all:
+	input:
+		expand('V1/{ext}/blast/{sample}/{sample}.nonhuman.fa', sample=config['SAMPLES'], ext=config['EXT']),
+		expand('V1/{ext}/exe/{sample}/{sample}.tblat.1', sample=config['SAMPLES'], ext=config['EXT']),
+		expand('V1/exe_merged/{sample}/{sample}_annotate.txt', sample=config['SAMPLES'])
+
+########################
+#rule subsample:
+#	input:
+#		r1='Data/samples/{sample}_R1.fastq.gz',
+#		r2='Data/samples/{sample}_R2.fastq.gz'
+#	output:
+#		r1_sub='V1/subsample_data/{sample}_R1.fastq.gz',
+#		r2_sub='V1/subsample_data/{sample}_R2.fastq.gz'
+#	shell:
+#		"""
+#		{SEQTK} sample -s10 {input.r1} 10000000 | gzip - > {output.r1_sub}
+#		{SEQTK} sample -s10 {input.r2} 10000000 | gzip - > {output.r2_sub}
+#		"""
+
+rule process:
+	input:
+		r1='Data/samples/{sample}_R1.fastq.gz',
+		r2='Data/samples/{sample}_R2.fastq.gz'
+		#r1 = 'V1/subsample_data/{sample}_R1.fastq.gz',
+		#r2 = 'V1/subsample_data/{sample}_R2.fastq.gz'
+	output:
+		r1 = 'V1/process/{sample}/{sample}.R1.fastq',
+		r2 = 'V1/process/{sample}/{sample}.R2.fastq',
+	threads: 1
+	shell:
+		"""
+		zcat {input.r1} | Bin/perl/Sequence/fastq_addstr.pl -s "-1" > {output.r1} ;
+		zcat {input.r2} | Bin/perl/Sequence/fastq_addstr.pl -s "-2" > {output.r2} ;
+		"""
+
+rule clip:
+	input:
+		r1 = 'V1/process/{sample}/{sample}.R1.fastq',
+		r2 = 'V1/process/{sample}/{sample}.R2.fastq',
+	output:
+		r1p = 'V1/clip/{sample}/{sample}.R1.paired.fastq',
+		r1u = 'V1/clip/{sample}/{sample}.R1.unpaired.fastq',
+		r2p = 'V1/clip/{sample}/{sample}.R2.paired.fastq',
+		r2u = 'V1/clip/{sample}/{sample}.R2.unpaired.fastq'
+	threads: 5
+	log: 'logs/clip/{sample}/{sample}.trim.log'
+	shell:
+		"""
+		java -jar {TRIM} PE -phred33 -threads {threads} \
+			{input.r1} {input.r2} \
+			{output.r1p} {output.r1u} {output.r2p} {output.r2u} \
+			{TRIM_SETTINGS} &>{log}
+		"""
+rule merge:
+	input:
+		r1p = 'V1/clip/{sample}/{sample}.R1.paired.fastq',
+		r2p = 'V1/clip/{sample}/{sample}.R2.paired.fastq',
+		r1u = 'V1/clip/{sample}/{sample}.R1.unpaired.fastq',
+		r2u = 'V1/clip/{sample}/{sample}.R2.unpaired.fastq'
+	output:
+		o1 = temp('V1/tmp_{sample}.merged.extendedFrags.fastq'),
+		o2 = temp('V1/{sample}.merged.unpaired.fastq'),
+		o3 = temp('V1/{sample}.merged.R1.fastq'),
+		o4 = temp('V1/{sample}.merged.R2.fastq'),
+		o5 = temp('V1/tmp_{sample}.merged.notCombined_1.fastq'),
+		o6 = temp('V1/tmp_{sample}.merged.notCombined_2.fastq'),
+		merged_u = 'V1/merge/{sample}/{sample}.unpaired.merged.fastq.gz',
+		merged_r1 = 'V1/merge/{sample}/{sample}.R1.merged.fastq.gz',
+		merged_r2 = 'V1/merge/{sample}/{sample}.R2.merged.fastq.gz'
+	threads: 1
+	log: 'logs/merge/{sample}/{sample}.merge.log'
+	shell:
+		"""
+		({FLASH} -m 10 {input.r1p} {input.r2p} -d V1/ -o tmp_{wildcards.sample}.merged) &>{log}
+
+		cat {output.o1} | Bin/perl/Sequence/fastq2stabq.pl | \
+			awk 'BEGIN {{ OFS = "\t" }} {{gsub(/-[12]$/,"-C",$1); print}}' | \
+			Bin/perl/Sequence/stabq2fastq.pl | \
+			cat - {input.r1u} {input.r2u} > {output.o2} ;
+		cat {output.o5} > {output.o3} ;
+		cat {output.o6} > {output.o4} ;
+
+		gzip < {output.o2} > {output.merged_u} ;
+		gzip < {output.o3} > {output.merged_r1} ;
+		gzip < {output.o4} > {output.merged_r2} ;
+		rm V1/tmp_{wildcards.sample}.merged.hist*
+		"""
+
+rule host_align_bwa:
+	input:
+		merged_r1 = 'V1/merge/{sample}/{sample}.R1.merged.fastq.gz',
+		merged_r2 = 'V1/merge/{sample}/{sample}.R2.merged.fastq.gz',
+		merged_u = 'V1/merge/{sample}/{sample}.unpaired.merged.fastq.gz'
+	output:
+		merged_r1_unz = temp('V1/{sample}.R1.merged.fastq'),
+        merged_r2_unz = temp('V1/{sample}.R2.merged.fastq'),
+		merged_u_unz = temp('V1/{sample}.unpaired.merged.fastq'),
+
+		prepairfq = temp('V1/{sample}.merged.inter.fastq'),
+		preorphanfq = temp('V1/{sample}.merged.empty.fastq'),
+		prepairfq_notag = temp('V1/{sample}.merged.inter2.fastq'),
+
+		bam_dups = temp('V1/{sample}_dups.bam'),
+		bam_dups_sorted = temp('V1/{sample}_dups_sorted.bam'),
+		nodups = temp('V1/tmp_{sample}.bam'),
+		forstats=temp('V1/tmp_{sample}.sortasorted.bam'),
+		nonhg_paired = temp('V1/tmp_{sample}.nonhg19_paired.bam'),
+		nonhg_unpaired = temp('V1/tmp_{sample}.nonhg19_unpaired.bam'),
+
+		fq1r1 = temp('V1/tmp_{sample}.nonhg19_paired_R1.fastq'),
+		fq1r2 = temp('V1/tmp_{sample}.nonhg19_paired_R2.fastq'),
+		fq2 = temp('V1/tmp_{sample}.nonhg19_unpaired.fastq'),
+
+		fq1r1_tag = temp('V1/tmp_{sample}.nonhg19_paired_R1_tag.fastq'),
+		fq1r2_tag = temp('V1/tmp_{sample}.nonhg19_paired_R2_tag.fastq'),
+
+		tmpfq1 = temp('V1/tmp_{sample}.tmp_1.fastq'),
+		tmpfq2 = temp('V1/tmp_{sample}.tmp_2.fastq'),
+		tmpfqC = temp('V1/tmp_{sample}.tmp_C.fastq'),
+		pairfq = temp('V1/tmp_{sample}.tmp_pair.fastq'),
+		orphanfq = temp('V1/tmp_{sample}.tmp_orphan.fastq'),
+
+		unpfq = 'V1/aligned/{sample}/{sample}.nonhg19_unpaired.fastq',
+		finalfq1 = 'V1/aligned/{sample}/{sample}.nonhg19.R1.fastq',
+		finalfq2 = 'V1/aligned/{sample}/{sample}.nonhg19.R2.fastq',
+		finalpair = 'V1/aligned/{sample}/{sample}.nonhg19_paired.fastq'
+	threads: 5
+	log:'logs/bwa/{sample}/{sample}.bwa.log'
+	shell:
+		"""
+		gunzip -c {input.merged_r1} > {output.merged_r1_unz} ;
+		gunzip -c {input.merged_r2} > {output.merged_r2_unz} ;
+		gunzip -c {input.merged_u} > {output.merged_u_unz} ;
+
+		python2.7 Bin/python/interleave_pairs.py {output.merged_r1_unz} {output.merged_r2_unz} \
+			{output.prepairfq} {output.preorphanfq} ;
+
+		sed 's/-1//g ; s/-2//g' {output.prepairfq} | cat - {output.merged_u_unz} > {output.prepairfq_notag} ;
+
+		touch "empty{wildcards.sample}.fq"
+        ({BWAMETH} --reference {METHREF} -t {threads} {output.prepairfq_notag} empty{wildcards.sample}.fq |
+			samtools view -@ {threads} -b -F 1024,512 - > {output.bam_dups}) &>{log}
+
+		rm empty{wildcards.sample}.fq
+
+		samtools view -@ {threads} -b {output.bam_dups} |
+			samtools sort -n -@ {threads} -o {output.bam_dups_sorted}
+
+		samtools fixmate -@ {threads} -m {output.bam_dups_sorted} - |
+			samtools sort -@ {threads} -o {output.forstats}
+		samtools markdup -r {output.forstats} {output.nodups}
+		samtools index {output.nodups}
+
+		samtools view -b -f 0x000D {output.bam_dups_sorted} -o {output.nonhg_paired} ;
+		samtools view -b -F 0x0001 -f 0x0004 {output.bam_dups_sorted} -o {output.nonhg_unpaired} ;
+
+		bedtools bamtofastq -i {output.nonhg_paired} -fq {output.fq1r1} -fq2 {output.fq1r2};
+		bedtools bamtofastq -i {output.nonhg_unpaired} -fq {output.fq2} ;
+
+		awk '{{if(NR%4==1){{gsub(/\/1$/,"-1");print $0}}else{{print $0}}}}' {output.fq1r1} > {output.fq1r1_tag}
+		awk '{{if(NR%4==1){{gsub(/\/2$/,"-2");print $0}}else{{print $0}}}}' {output.fq1r2} > {output.fq1r2_tag}
+
+		cat {output.fq1r1_tag} {output.fq1r2_tag} {output.fq2} | Bin/perl/Sequence/fastq2stabq.pl | \
+			grep -P "\-1\t" | Bin/perl/Sequence/stabq2fastq.pl > {output.tmpfq1} ;
+		cat {output.fq1r1_tag} {output.fq1r2_tag} {output.fq2} | Bin/perl/Sequence/fastq2stabq.pl | \
+			grep -P "\-2\t" | Bin/perl/Sequence/stabq2fastq.pl > {output.tmpfq2} ;
+		cat {output.fq1r1_tag} {output.fq1r2_tag} {output.fq2} | Bin/perl/Sequence/fastq2stabq.pl | \
+			grep -P "\-C\t" | Bin/perl/Sequence/stabq2fastq.pl > {output.tmpfqC} ;
+
+		python2.7 Bin/python/interleave_pairs.py {output.tmpfq1} {output.tmpfq2} \
+			{output.pairfq} {output.orphanfq} ;
+
+		cat {output.orphanfq} {output.tmpfqC} > {output.unpfq} ;
+
+		cat {output.pairfq} | Bin/perl/Sequence/fastq2stabq.pl | \
+                      grep -P "\-1\t" | Bin/perl/Sequence/stabq2fastq.pl > {output.finalfq1} ;
+		cat {output.pairfq} | Bin/perl/Sequence/fastq2stabq.pl | \
+                      grep -P "\-2\t" | Bin/perl/Sequence/stabq2fastq.pl > {output.finalfq2} ;
+
+		cp {output.pairfq} {output.finalpair} ;
+		"""
+
+rule phix_align:
+	input:
+		r1='V1/aligned/{sample}/{sample}.nonhg19.R1.fastq',
+		r2='V1/aligned/{sample}/{sample}.nonhg19.R2.fastq',
+		u='V1/aligned/{sample}/{sample}.nonhg19_unpaired.fastq'
+	output:
+		interpair= temp('V1/{sample}_inter_phi_pair'),
+		interorph= temp('V1/{sample}_inter_phi_orph'),
+		interpair_notag=temp('V1/{sample}_inter_notag'),
+
+		bam_dups = temp('V1/{sample}.nonhg19_phiX_dups.bam'),
+		bam_dups_sorted = temp('V1/{sample}.nonhg19_phiX_dups_sorted.bam'),
+		bam_nodups = temp('V1/{sample}.nonhg19_phiX_nodups.bam'),
+
+		paired = temp('V1/tmp_{sample}.nonhg19_nonphiX_paired.bam'),
+		unpaired = temp('V1/tmp_{sample}.nonhg19_nonphiX_unpaired.bam'),
+		fq2 = temp('V1/tmp_{sample}.nonhg19_unpaired.fastq'),
+		fq1r1 = temp('V1/tmp_{sample}.nonhg19_phi_paired_R1.fastq'),
+                fq1r2 = temp('V1/tmp_{sample}.nonhg19_phi_paired_R2.fastq'),
+		fq1r1_tag = temp('V1/tmp_{sample}.nonhg19_phi_paired_R1_tag.fastq'),
+                fq1r2_tag = temp('V1/tmp_{sample}.nonhg19_phi_paired_R2_tag.fastq'),
+		tmpfq1 = temp('V1/tmp_{sample}.tmp_1.fastq'),
+		tmpfq2 = temp('V1/tmp_{sample}.tmp_2.fastq'),
+		tmpfqC = temp('V1/tmp_{sample}.tmp_C.fastq'),
+		pairfq = temp('V1/tmp_{sample}.tmp_pair.fastq'),
+		orphanfq = temp('V1/tmp_{sample}.tmp_orphan.fastq'),
+		unpfq = 'V1/phix_aligned/{sample}/{sample}.nonhg19_nonphiX_unpaired.fastq',
+		finalfq1 = 'V1/phix_aligned/{sample}/{sample}.nonhg19_nonphiX.R1.fastq',
+		finalfq2 = 'V1/phix_aligned/{sample}/{sample}.nonhg19_nonphiX.R2.fastq',
+
+		finalpair = 'V1/phix_aligned/{sample}/{sample}.nonhg19_nonphiX_paired.fastq',
+		nh1 = 'V1/phix_aligned/{sample}/{sample}.nonhost.R1.fastq',
+		nh2 = 'V1/phix_aligned/{sample}/{sample}.nonhost.R2.fastq',
+		nhu = 'V1/phix_aligned/{sample}/{sample}.nonhost_unpaired.fastq'
+	threads: 5
+	log: 'logs/phiX/{sample}/{sample}.phix.log'
+	shell:
+		"""
+		python2.7 Bin/python/interleave_pairs.py {input.r1} {input.r2} \
+			{output.interpair} {output.interorph}
+
+		sed 's/-1//g ; s/-2//g' {output.interpair} | cat - {input.u} > {output.interpair_notag}
+
+		(bwa mem -p -t {threads} {BWA_HG19} {output.interpair_notag} | \
+			samtools view -F 1024,2048 -bS - > {output.bam_dups}) &>{log}
+
+        samtools view -@ {threads} -b {output.bam_dups} |
+        	samtools sort -n -@ {threads} -o {output.bam_dups_sorted}
+        samtools fixmate -@ {threads} -m {output.bam_dups_sorted} - |
+            samtools sort -@ {threads} -o - | samtools markdup -r - {output.bam_nodups}
+
+		samtools view -b -f 0x000D {output.bam_dups_sorted} -o {output.paired}
+		samtools view -b -F 0x0001 -f 0x0004 {output.bam_dups_sorted} -o {output.unpaired}
+
+        bedtools bamtofastq -i {output.paired} -fq {output.fq1r1} -fq2 {output.fq1r2}
+        bedtools bamtofastq -i {output.unpaired} -fq {output.fq2}
+
+        awk '{{if(NR%4==1){{gsub(/\/1$/,"-1");print $0}}else{{print $0}}}}' {output.fq1r1} > {output.fq1r1_tag}
+        awk '{{if(NR%4==1){{gsub(/\/2$/,"-2");print $0}}else{{print $0}}}}' {output.fq1r2} > {output.fq1r2_tag}
+
+		cat {output.fq1r1_tag} {output.fq1r2_tag} {output.fq2} | Bin/perl/Sequence/fastq2stabq.pl | \
+			grep -P "\-1\t" | Bin/perl/Sequence/stabq2fastq.pl > {output.tmpfq1} ;
+		cat {output.fq1r1_tag} {output.fq1r2_tag} {output.fq2} | Bin/perl/Sequence/fastq2stabq.pl | \
+			grep -P "\-2\t" | Bin/perl/Sequence/stabq2fastq.pl > {output.tmpfq2} ;
+		cat {output.fq1r1_tag} {output.fq1r2_tag} {output.fq2} | Bin/perl/Sequence/fastq2stabq.pl | \
+			grep -P "\-C\t" | Bin/perl/Sequence/stabq2fastq.pl > {output.tmpfqC} ;
+
+		python2.7 Bin/python/interleave_pairs.py {output.tmpfq1} {output.tmpfq2} \
+			{output.pairfq} {output.orphanfq} ;
+
+		cat {output.orphanfq} {output.tmpfqC} > {output.unpfq} ;
+
+		cat {output.pairfq} | Bin/perl/Sequence/fastq2stabq.pl | \
+			grep -P "\-1\t" | Bin/perl/Sequence/stabq2fastq.pl > {output.finalfq1} ;
+		cat {output.pairfq} | Bin/perl/Sequence/fastq2stabq.pl | \
+			grep -P "\-2\t" | Bin/perl/Sequence/stabq2fastq.pl > {output.finalfq2} ;
+
+		cp {output.pairfq} {output.finalpair} ;
+
+		cp {output.finalfq1} {output.nh1} ;
+		cp {output.finalfq2} {output.nh2} ;
+		cp {output.unpfq} {output.nhu} ;
+		"""
+
+rule aln_stats:
+	input:
+		nhpair = 'V1/aligned/{sample}/{sample}.nonhg19_paired.fastq',
+		nhunpair = 'V1/aligned/{sample}/{sample}.nonhg19_unpaired.fastq',
+
+		nphix1 = 'V1/phix_aligned/{sample}/{sample}.nonhg19_nonphiX.R1.fastq',
+		nphunpair = 'V1/phix_aligned/{sample}/{sample}.nonhg19_nonphiX_unpaired.fastq',
+		nhost1 = 'V1/phix_aligned/{sample}/{sample}.nonhost.R1.fastq',
+		nhostunpair = 'V1/phix_aligned/{sample}/{sample}.nonhost_unpaired.fastq',
+		normalbam = 'V1/tmp_{sample}.sortasorted.bam',
+		rmvdupbam = 'V1/tmp_{sample}.bam'
+	output:
+		stat = 'V1/{sample}_stats.align.tab'
+	params: chr='chr21'
+	threads: 1
+	shell:
+		"""
+		bash Bin/fastq_counter.sh {input.nhpair} nonhg19_pairs {wildcards.sample} >> {output.stat} ;
+		bash Bin/fastq_counter.sh {input.nhunpair} nonhg19_orphans {wildcards.sample} >> {output.stat} ;
+		bash Bin/fastq_counter.sh {input.nphix1} nonphiX_pairs {wildcards.sample} >> {output.stat} ;
+		bash Bin/fastq_counter.sh {input.nphunpair} nonphiX_orphans {wildcards.sample} >> {output.stat} ;
+		bash Bin/fastq_counter.sh {input.nhost1} nondust_pairs {wildcards.sample} >> {output.stat} ;
+		bash Bin/fastq_counter.sh {input.nhostunpair} nondust_orphans {wildcards.sample} >> {output.stat} ;
+		bash Bin/coverage_calc.sh {input.rmvdupbam} {params.chr} {wildcards.sample} {CHROMO_SIZES} >> {output.stat} ;
+		bash Bin/non_duplicate_frac.sh {input.normalbam} {input.rmvdupbam} {wildcards.sample} >> {output.stat} ;
+		"""
+rule grammy_blast:
+	input:
+		nh1='V1/phix_aligned/{sample}/{sample}.nonhost.R1.fastq',
+		nh2='V1/phix_aligned/{sample}/{sample}.nonhost.R2.fastq',
+		nhu='V1/phix_aligned/{sample}/{sample}.nonhost_unpaired.fastq'
+	output:
+		nonhumanfq='V1/{ext}/blast/{sample}/{sample}.total.fq',
+		nonhumanfa='V1/{ext}/blast/{sample}/{sample}.nonhuman.fa',
+		nonhumanfa_converted='V1/{ext}/blast/{sample}{sample}.nonhuman.{ext}.fa',
+		tmpout='V1/{ext}/blast/{sample}.tab.tmp'
+	threads: 5
+	shell:
+		"""
+		if [ {wildcards.ext} == "C2T" ]
+		then
+			strand=plus
+		else
+			strand=minus
+		fi
+		echo "$strand"
+        cat {input.nh1} {input.nh2} {input.nhu} > {output.nonhumanfq}
+		fastq_to_fasta -Q33 -i {output.nonhumanfq} -o {output.nonhumanfa}
+		echo "$BLASTDB"
+		python Bin/insilico_conversion.py {output.nonhumanfa} {output.nonhumanfa_converted} {wildcards.ext}
+		blastn -query {output.nonhumanfa_converted} \
+				-strand $strand \
+                -db 'blast/NCBIGenomes06{wildcards.ext}.curated' \
+                -out {output.tmpout} \
+                -evalue 0.0001 \
+                -perc_identity 95 \
+                -culling_limit 2 \
+                -num_threads {threads} \
+		-outfmt '6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore staxids scomnames sskingdoms qlen'
+		"""
+
+rule grammy_filter_blast:
+	input:
+		blast_tmp='V1/{ext}/blast/{sample}.tab.tmp',
+		nhu = 'V1/phix_aligned/{sample}/{sample}.nonhost_unpaired.fastq'
+	output:
+		tblat0 = 'V1/{ext}/exe/{sample}/{sample}.tblat.0',
+		orphans = temp('V1/{ext}/exe/{sample}/{sample}_orphans.txt'),
+		tblat1 = 'V1/{ext}/exe/{sample}/{sample}.tblat.1'
+	threads: 1
+	shell:
+		"""
+		cat {input.blast_tmp} \
+	        | Bin/perl/Lib/cut.pl -f 1-,4 \
+	        | Bin/perl/Lib/modify_column.pl -c 16 -dc 15 \
+        	| Bin/perl/Lib/filter.pl -c 16 -min 0.9 \
+	        | Bin/perl/Lib/filter.pl -c 2 -min 90 \
+        	| cut -f 1-15 \
+	        	> {output.tblat0}
+		cat {input.nhu} | Bin/perl/Sequence/fastq2stabq.pl | cut -f 1 | grep -v -e 'C$' \
+        	> {output.orphans}
+		python2.7 Bin/remove-double-counts-from-blast.py \
+			{output.tblat0} {output.orphans} > {output.tblat1}
+		"""
+
+rule filter_tblat1:
+	input:
+		c2ttblat1='V1/C2T/exe/{sample}/{sample}.tblat.1',
+		g2atblat1='V1/G2A/exe/{sample}/{sample}.tblat.1'
+	output:
+		tblat1='V1/exe_merged/{sample}/{sample}.tblat.1'
+	shell:
+		"""
+		cat {input.c2ttblat1} {input.g2atblat1} > {output.tblat1}
+		"""
+
+rule grammy_exe:
+	input:
+		nonhumanfa='V1/C2T/blast/{sample}/{sample}.nonhuman.fa', #This file is the same as the G2A one (before conversion)
+		tblat1 = 'V1/exe_merged/{sample}/{sample}.tblat.1',
+	output:
+		nonhumanfa_gz='V1/exe_merged/{sample}/{sample}.fa.gz',
+		tab='V1/exe_merged/{sample}/{sample}.tab'
+	threads: 1
+	params:
+		dir='../../..'
+	log: 'logs/exe_merged/{sample}/{sample}.exe.log'
+	shell:
+		"""
+		cat {input.nonhumanfa} | gzip > {output.nonhumanfa_gz}
+		cd V1/exe_merged/{wildcards.sample}
+
+		(python2.7 -V) &>{params.dir}/{log}
+		(python2.7 {params.dir}/Bin/GRAMMy/grammy/grammy_rdt.py -t illumina . .;) &>>{params.dir}/{log}
+        	(python2.7 {params.dir}/Bin/GRAMMy/grammy/grammy_pre.py -q "40,75,-5" {wildcards.sample} {params.dir}/grammy/NCBIGenomes06C2T ;) &>>{params.dir}/{log}
+
+		(python2.7 {params.dir}/Bin/GRAMMy/grammy/grammy_em.py -c L -b 5 -t .00001 -n 100 {wildcards.sample}.mtx ;) &>>{params.dir}/{log}
+        	(python2.7 {params.dir}/Bin/GRAMMy/grammy/grammy_post.py {wildcards.sample}.est {params.dir}/grammy/NCBIGenomes06C2T {wildcards.sample}.btp) &>>{params.dir}/{log}
+
+	        cat {wildcards.sample}.gra \
+		        | {params.dir}/Bin/perl/Lib/transpose.pl \
+        		| {params.dir}/Bin/perl/Lib/filter.pl -c 1 -mins 0 \
+		        | {params.dir}/Bin/perl/Lib/add_column.pl -b -s "{wildcards.sample}" \
+        		> {params.dir}/{output.tab}; \
+		"""
+
+rule grammy_annotate:
+	input:
+		tblat1='V1/exe_merged/{sample}/{sample}.tblat.1',
+		stat='V1/{sample}_stats.align.tab',
+		tab='V1/exe_merged/{sample}/{sample}.tab'
+	output:
+		placeholder='V1/exe_merged/{sample}/{sample}_annotate.txt'
+	params:
+		DIR='V1/',
+		DB='exe_merged/{sample}',
+		LUT='LUTGrammy/taxids_names_lengths_tax.tab'
+	shell:
+		"""
+		Rscript Bin/R/annotate.grammy_APC.R {params.DIR} {params.DB} {wildcards.sample} {params.LUT}
+		echo "annotated" > {output.placeholder}
+		"""
