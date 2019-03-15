@@ -1,0 +1,383 @@
+"""
+Snakefile to create Methylation reference tables
+Alexandre Pellan Cheng 2018
+The broad steps of this pipeline are:
+1- download all files. Most are in bigWig format, some are in bed+ format
+2- Conververt BigWigs to bedGraphs
+3- Change files in GrCH38 to hg19
+4- Change encode bed+ format to standard 4 collumn BED
+5- Create a lookup table that shows new names and what tissue group each
+reference belongs to. Files are renamed for better understanding
+6- Normalize all tissues (some methylation fractions are out of 1, 10 and 100)
+7- Each consortium/research group has a different way of calling a CpG. Step 7
+scales it all to singleBP resolution with the 1-base nomenclature.
+8- Write MethylMatrix that contains all reference tissue methylation values
+9- Perform Metilene to find differentially methylated regions
+10- Bin values on those regions
+
+Extra: there is limited support for BAM files that were aligned with Bismark
+"""
+
+# Import modules needed --------------------------------------------------------
+import os
+from fnmatch import fnmatch
+from natsort import natsorted, ns
+import itertools
+import numpy as np
+from create_lookup import  find_references, create_tissue_groups, create_lookup
+
+# Config file ------------------------------------------------------------------
+configfile: 'config.yaml'
+#Declare variables -------------------------------------------------------------
+CROSSMAP=config['CROSSMAP']
+bigWigToBedGraph=config['bigWigToBedGraph']
+hg38tohg19=config['hg38tohg19']
+HG19=config['HG19']
+HG19_CHR_LENGTHS=config['HG19_CHR_LENGTHS']
+METILENE=config['METILENE']
+AUTOSOMALCHROMO=['chr1', 'chr2', 'chr3', 'chr4', 'chr5', 'chr6', 'chr7', 'chr8', 'chr9', 'chr10', 'chr11', 'chr12', 'chr13', 'chr14', 'chr15', 'chr16', 'chr17', 'chr18', 'chr19', 'chr20', 'chr21', 'chr22']
+tissue_groups = ["macrophage", "BCell", "bladder","TCell","monocyte","NKCell", "dendritic","eosonophil","erythroblast", "liver/hepatocyte", "pancreas/islet","kidney/podocyte/mesangial","colon/intestine", "neutrophil","skin","spleen"]
+BISMARK_METH_EXTRACT=config['BISMARK-METH-EXTRACT']
+#Folder Snakefile is in
+main_directory=os.getcwd()
+
+# Functions --------------------------------------------------------------------
+#Used to get variable names for snakemake params
+def string_split(string, delimiter, number_of_splits):
+    s=string.split(delimiter, number_of_splits)
+    return(s)
+
+#Used to estimate methylation value of a reference without CpG coverage
+# based on the methylation values of similar tissues
+def alpha_beta(group_meth):
+    L=[]
+    num_to_infer=0
+    for meth in group_meth:
+            if meth != "-":
+                L.append(float(meth))
+            else:
+                num_to_infer=num_to_infer+1
+    if group_meth.count("-") != 0:
+        mean=np.mean(L)
+        std=np.std(L)
+        alpha=((mean*(1-mean))/(std*std)-1)*mean
+        beta=(1-mean)*(mean*(1-mean)/(std*std)-1)
+        if alpha < 0.000001:
+            alpha=0.000001
+        if beta < 0.000001:
+            beta=0.000001
+        beta_estimates=np.random.beta(alpha, beta, num_to_infer)
+    infered_meth=[]
+    k=0
+    for meth in group_meth:
+        if meth !="-":
+            infered_meth.append(meth)
+        else:
+            infered_meth.append(beta_estimates[k])
+            k=k+1
+    return infered_meth
+
+# Variables to be used by snakemake --------------------------------------------
+#Get locations of all download files for each tissue and cell type
+download_file_list=find_references('./', 'download.sh', 'download.sh', 'download.sh', 'download.sh')
+#Relative path of all original data files downloaded from consortiums
+refs=find_references('./', '*.bw', '*.bigWig', '*.bed.gz', '*.bam')
+#number of different tissue groups
+groups = create_tissue_groups(tissue_groups)
+#Create better names for each files
+new_names=create_lookup(groups, refs, tissue_groups)[3]
+#Create combinations of groups to be compared by metilene
+g=natsorted(groups[tissue] for tissue in tissue_groups)
+comparing_groups=list(itertools.combinations(g, 2))
+comparing_groups=[x[0]+'_'+x[1] for x in comparing_groups]
+# Names of original files downloaded (without path)
+file_list=[x.rsplit('/',1)[1] for x in refs]
+
+rule all:
+    input:
+    #from rule download_files
+        expand('{download_file}.placeholder', download_file=download_file_list),
+    #from rule bigwig2bedgraph
+        expand('preprocessing_references/bigWig2BedGraph/{reference_file}.bedGraph', reference_file=file_list),
+    #from rule liftover_human_builds
+        expand('preprocessing_references/liftover/{reference_file}.bedGraph.lifted', reference_file=file_list),
+    #from rule encode_format
+        expand('preprocessing_references/bed4_format/{reference_file}.bedGraph.lifted.bed4', reference_file=file_list),
+    #from rule lookup_table
+        'lookup_table.txt',
+    #from rule normalize_tissues
+        expand('preprocessing_references/normalized/{new_name}.bedGraph', new_name=new_names),
+    #from rule singleBP_BedGraph
+        expand('preprocessing_references/singleBP_bedGraph/{new_name}.singlebp.bedGraph', new_name=new_names),
+    #from rule write_MethylMatrix
+        expand('MethylMatrix/MethylMatrix{extension}', extension=['.txt', '.body', '.header']),
+    #from rule split_MethylMatrix_by_chr
+        expand('MethylMatrix/{chr}/MethylMatrix_{chr}', chr=AUTOSOMALCHROMO),
+    #from rule Metilene_function
+        expand('MethylMatrix/{chr}/{comp_group}_{chr}', comp_group=comparing_groups, chr=AUTOSOMALCHROMO),
+    #from rule merge_per_chr_Metilene
+        'MethylMatrix/all_chr/all_groups.metilene',
+        'MethylMatrix/all_chr/all_groups_merged_overlap.metilene',
+    #from rule MethylMatrix_on_DMR
+        'MethylMatrix/MethylMatrix.DMR.body',
+    #from rule MethylMatrix_on_DMR
+        'MethylMatrix/MethylMatrix.DMR.body.curated',
+        'MethylMatrix/MethylMatrix.DMR.body.curated.ID',
+    #from rule currate_MethylMatrix
+        'MethylMatrix/MethylMatrix_binned'
+    message: "Snakemake completed succesfully"
+
+rule download_files:
+    input:
+        download_files ='{download_file}'
+    output:
+        placeholder = '{download_file}.placeholder'
+    shell:
+        """
+        dir=$(dirname {input.download_files})
+        cd $dir
+        bash download.sh
+        cd {main_directory}
+        touch {output.placeholder}
+        """
+
+# We convert everything to bedGraph file. Bed format is renamed for simplicity
+rule BigWig2BedGraph:
+    input:
+        expand('{download_file}.placeholder', download_file=download_file_list)
+    output:
+        bedGraph='preprocessing_references/bigWig2BedGraph/{reference_file}.bedGraph'
+    message: "Performing BigWig2BedGraph to create {output.bedGraph}"
+    threads: 10
+    params:
+        outdir='preprocessing_references/bigWig2BedGraph/'
+    shell:
+        """
+        INPUT=$(find -name {wildcards.reference_file})
+        if [[ $INPUT == *bw ]] || [[ $INPUT == *bigWig ]]; then
+            {bigWigToBedGraph} $INPUT {output.bedGraph}
+        fi
+        if [[ $INPUT == *bed.gz ]]; then
+            gunzip -c $INPUT > {output.bedGraph}
+        fi
+        if [[ $INPUT == *bam ]]; then
+            #{BISMARK_METH_EXTRACT} --parallel {threads} --bedGraph $INPUT --output {params.outdir}
+            REF_FILE={wildcards.reference_file}
+            BISMARK_FILE={params.outdir}${{REF_FILE::-4}}.bedGraph.gz
+            mv $BISMARK_FILE $INPUT.bedGraph
+            gunzip -c $INPUT.bedGraph > {output.bedGraph}
+        fi
+        """
+
+# Files under build hg38 need to be scaled to hg19. files already in hg19 are
+# copied over
+rule liftover_human_builds:
+    input:
+        bedGraph='preprocessing_references/bigWig2BedGraph/{reference_file}.bedGraph'
+    output:
+        lifted='preprocessing_references/liftover/{reference_file}.bedGraph.lifted'
+    run:
+        from shutil import copyfile
+        filename=input.bedGraph.split('/')[2].rsplit('.',1)[0]
+        for path, subdirs, files in os.walk('./'):
+            for name in files:
+                if fnmatch(name, filename):
+                    build_path=path
+        build=[line.strip() for line in open(build_path+'/genome_build')][0]
+        if build == 'hg19':
+            copyfile(input.bedGraph, output.lifted)
+        elif build == 'GRCh38':
+            cmd = 'python2.7 ' + CROSSMAP + ' bed ' + hg38tohg19 + ' ' + input.bedGraph + ' ' + output.lifted
+            os.system(cmd)
+
+#Certain files from ENCODE have a BED9+ format which needs to be formatted to a 4 col bed
+rule encode_format:
+    input:
+        lifted = 'preprocessing_references/liftover/{reference_file}.bedGraph.lifted'
+    output:
+        formatted='preprocessing_references/bed4_format/{reference_file}.bedGraph.lifted.bed4'
+    shell:
+        """
+        FILE_PATH=$(find -name {wildcards.reference_file})
+        num_cols=$(head -n 1 {input.lifted} | wc -w)
+        if [[ $FILE_PATH == *ENCODE* ]] && (( $num_cols > 9 )); then
+            awk -v OFS='\t' '{{if ($10) print $1,$2,$3,$11}}' < {input.lifted} > {output.formatted}
+        else
+            cp {input.lifted} {output.formatted}
+        fi
+        """
+
+rule lookup_table:
+    input:
+        formatted = expand('preprocessing_references/bed4_format/{reference_file}.bedGraph.lifted.bed4', reference_file=file_list)
+    output:
+        lookup_table = 'lookup_table.txt'
+    message: "Creating lookup table"
+    shell:
+        "python create_lookup.py {output.lookup_table}"
+
+#Some of these files are scaled from 0 to 1, 0 to 10, 0, 100. We normalize
+# Everything to a methylation fraction and use the lookup table to rename files.
+rule normalize_tissues:
+    input:
+        lookup_table = 'lookup_table.txt'
+    output:
+        renamed_file = 'preprocessing_references/normalized/{new_name}.bedGraph'
+    run:
+        import pandas as pd
+        import numpy as np
+        import datetime
+        with open(input.lookup_table) as f:
+            each_reference = [line.strip().split('\t') for line in f]
+        for ref in each_reference:
+            if wildcards.new_name in ref[2]:
+                bed4_file='preprocessing_references/bed4_format/'+ref[3].rsplit('/',1)[1]+'.bedGraph.lifted.bed4'
+                ref_df = pd.read_table(bed4_file, names=('chr', 'start', 'end', 'meth'))
+                break
+        ref_df['meth'] = ref_df['meth']/np.max(ref_df['meth'])
+        ref_df.to_csv(output.renamed_file, sep='\t', float_format='%.8f', index=False, header=False)
+
+rule singleBP_BedGraph: #scaleback
+    input:
+        normalized_file='preprocessing_references/normalized/{new_name}.bedGraph'
+    output:
+        singleBP_file ='preprocessing_references/singleBP_bedGraph/{new_name}.singlebp.bedGraph'
+    shell:
+        """
+        python Bin/singleBP_bedGraph.py {input.normalized_file} {output.singleBP_file} {HG19_CHR_LENGTHS} {HG19}
+        """
+
+rule write_MethylMatrix:
+    input:
+        expand('preprocessing_references/singleBP_bedGraph/{new_name}.singlebp.bedGraph', new_name=new_names),
+        lookup_table = 'lookup_table.txt'
+    output:
+        MethylMatrix = 'MethylMatrix/MethylMatrix.txt',
+        MethylMatrix_header = 'MethylMatrix/MethylMatrix.header',
+        MethylMatrix_body = 'MethylMatrix/MethylMatrix.body'
+    message: "Creating MethylMatrix"
+    run:
+        files_to_merge = ['preprocessing_references/singleBP_bedGraph/'+line.split()[2]+'.singlebp.bedGraph' for line in open(input.lookup_table).readlines()]
+        group_ids = [line.split()[1] for line in open(input.lookup_table).readlines()]
+        unionbed_command = 'bedtools unionbedg -i ' + ' '.join(files_to_merge) + ' -header -names ' + ' '.join(group_ids) + ' -filler - > ' + output.MethylMatrix
+        os.system(unionbed_command)
+        body_only_command = 'tail -n +2 ' + output.MethylMatrix + ' > ' + output.MethylMatrix_body
+        os.system(body_only_command)
+        header_only_command = 'head -n 1 ' + output.MethylMatrix + ' > ' + output.MethylMatrix_header
+        os.system(header_only_command)
+
+rule split_MethylMatrix_by_chr:
+    input:
+        MethylMatrix_header='MethylMatrix/MethylMatrix.header',
+        MethylMatrix_body = 'MethylMatrix/MethylMatrix.body'
+    output:
+        MethylMatrix_chr = 'MethylMatrix/{chr}/MethylMatrix_{chr}'
+    shell:
+        """
+        cp {input.MethylMatrix_header} {output.MethylMatrix_chr}
+        CHR=$(echo {output.MethylMatrix_chr} | sed 's/^.*_//')
+        bedextract $CHR {input.MethylMatrix_body} >> {output.MethylMatrix_chr}
+        """
+# Metilene works by comparing 2 groups at a time. We create a list of tuples to
+# compare each group.
+rule Metilene_function:
+    input:
+        MethylMatrix_chr = 'MethylMatrix/{chr}/MethylMatrix_{chr}'
+    output:
+        compared_groups = 'MethylMatrix/{chr}/{comp_group}_{chr}'
+    log: 'logs/Metilene/{comp_group}_{chr}'
+    params:
+        groupA= lambda wildcards: string_split(wildcards.comp_group, '_',1)[0],
+        groupB= lambda wildcards: string_split(wildcards.comp_group, '_',1)[1]
+    shell:
+        """
+        ({METILENE} -M 100 -d 0.2 -a {params.groupA}_ -b {params.groupB}_ {input.MethylMatrix_chr} |
+            sort -V -k1,1 -k2,2n > {output.compared_groups}) 2> {log}
+        """
+
+rule merge_per_chr_Metilene:
+    input:
+        expand('MethylMatrix/{chr}/{comp_group}_{chr}', comp_group=comparing_groups, chr=AUTOSOMALCHROMO)
+    output:
+        unmerged = 'MethylMatrix/all_chr/all_groups.metilene',
+        merged='MethylMatrix/all_chr/all_groups_merged_overlap.metilene'
+    params:
+        input_files = lambda wildcards, input: ' '.join(natsorted(input))
+    shell:
+        """
+        cat {params.input_files} | awk '$4 < 0.05' | cut -f -3 | sort | uniq | sort-bed - > {output.unmerged}
+        bedtools merge -i {output.unmerged} > {output.merged}
+        """
+
+rule MethylMatrix_on_DMR:
+    input:
+        bedfile = 'MethylMatrix/all_chr/all_groups_merged_overlap.metilene',
+        MethylMatrix_body = 'MethylMatrix/MethylMatrix.body'
+    output:
+        MethylMatrix_DMR = 'MethylMatrix/MethylMatrix.DMR.body'
+    shell:
+        """
+        bedtools intersect -wo -a {input.bedfile} -b {input.MethylMatrix_body} |
+            cut -f 4- | awk '$3-$2==1 {{print $0}}' | awk 'NF{{NF-=1}};1' > {output.MethylMatrix_DMR}
+        """
+
+rule currate_MethylMatrix:
+    input:
+        lookup_table = 'lookup_table.txt',
+        MethylMatrix_DMR = 'MethylMatrix/MethylMatrix.DMR.body'
+    output:
+        MethylMatrix_DMR_curated = 'MethylMatrix/MethylMatrix.DMR.body.curated',
+        MethylMatrix_DMR_curated_ID = 'MethylMatrix/MethylMatrix.DMR.body.curated.ID'
+    run:
+        groups = natsorted(set([line.split()[0] for line in open(input.lookup_table).readlines()]))
+        group_ids = [line.split()[1] for line in open(input.lookup_table).readlines()]
+        refs_per_group = {}
+        for group in groups:
+            refs_per_group[group] = sum(group+'_' in x for x in group_ids)
+        with open(input.MethylMatrix_DMR) as MM, open(output.MethylMatrix_DMR_curated, 'w') as MMC:
+            for line in MM:
+                methvals = line.strip().split(' ')[3:]
+                i = 0
+                missing_ratio=[]
+                all_groups_meth=[]
+                over20=False
+                for group in groups:
+                    ratio=methvals[i:i+refs_per_group[group]].count("-")/refs_per_group[group]
+                    if ratio > 0.2:
+                        over20=True
+                    all_groups_meth.append(methvals[i:i+refs_per_group[group]])
+                    i=i+int(refs_per_group[group])
+                if not over20:
+                    infered_meth=line.split(" ")[0]+"\t"+line.split(" ")[1]+"\t"+line.split(" ")[2]
+                    for group_meth in all_groups_meth:
+                        infered_group_meth=alpha_beta(group_meth)
+                        for inf_meth in infered_group_meth:
+                            infered_meth=infered_meth+"\t"+str(inf_meth)
+                    infered_meth=infered_meth+"\n"
+                    MMC.write(infered_meth)
+        cmd = """awk -v OFS='\t' '{$3=$3"\t"NR}'1 """ + output.MethylMatrix_DMR_curated + " | sed '/nan/d' - > " + output.MethylMatrix_DMR_curated_ID
+        os.system(cmd)
+
+rule bin_MethylMatrix:
+    input:
+        lookup_table = 'lookup_table.txt',
+        MethylMatrix_DMR_curated_ID = 'MethylMatrix/MethylMatrix.DMR.body.curated.ID',
+        merged='MethylMatrix/all_chr/all_groups_merged_overlap.metilene'
+    output:
+        MethylMatrix_binned = 'MethylMatrix/MethylMatrix_binned',
+        MethylMatrix_tmp = temp('MethylMatrix/MatrixMatrix.tmp'),
+        MethylMatrix_tmp2 = temp('MethylMatrix/MatrixMatrix.tmp2')
+    shell:
+        """
+        num_refs=$(wc -l {input.lookup_table} | cut -f1 -d' ')
+        cp {input.merged} {output.MethylMatrix_binned}
+        for column in $(seq 5 $((num_refs+4)))
+        do
+            echo "Binning for column $((column-4)) out of $num_refs"
+            cut -f-4,$column {input.MethylMatrix_DMR_curated_ID} > {output.MethylMatrix_tmp}
+            bedmap --fraction-map 1 --mean --delim '\t' {input.merged} {output.MethylMatrix_tmp} |
+                paste {output.MethylMatrix_binned} - > {output.MethylMatrix_tmp2}
+            mv {output.MethylMatrix_tmp2} {output.MethylMatrix_binned}
+        done
+        touch {output.MethylMatrix_tmp2}
+        """
