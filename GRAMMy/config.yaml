@@ -16,8 +16,7 @@ FLASH: /programs/flash
 SGREP: /programs/sgrep_sorted/bin/sgrep
 SAMTOOLS: /programs/samtools-1.6/bin/samtools
 SEQTK: software/seqtk/seqtk
-TRIM: Bin/Trimmomatic-0.32/trimmomatic-0.32.jar
-TRIM_SETTINGS: ILLUMINACLIP:/Bin/Trimmomatic-0.32/adapters/Meyerprep.fa:2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:30
+TRIM_SETTINGS: ILLUMINACLIP:Bin/Trimmomatic-0.32/adapters/Meyerprep.fa:2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:30
 
 METHREF: references/hg19_bwameth/hg19.fa
 
